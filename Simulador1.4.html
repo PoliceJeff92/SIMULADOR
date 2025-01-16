@@ -1,0 +1,286 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Quiz App</title>
+    <!-- SheetJS para Excel -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    <style>
+        body { font-family: Arial; margin: 20px; }
+        .btn { 
+            background: #4CAF50; 
+            color: white; 
+            padding: 10px 20px; 
+            border: none; 
+            cursor: pointer; 
+            margin: 5px;
+        }
+        .btn-danger {
+            background: #f44336;
+        }
+        .container { max-width: 800px; margin: auto; }
+        .input-group { margin: 10px 0; }
+        input, select { padding: 8px; margin: 5px 0; width: 100%; }
+        .correct { color: green; }
+        .incorrect { color: red; }
+        .test-section { display: none; } /* Ocultar sección de test inicialmente */
+        .options { margin: 10px 0; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Quiz App</h1>
+
+        <!-- Importar Excel -->
+        <div class="input-group">
+            <h3>Importar preguntas desde Excel</h3>
+            <p>El archivo debe tener columnas: Pregunta, Respuesta, Categoría, Tipo, Opciones (separadas por comas), Correcta (índice de la opción correcta)</p>
+            <input type="file" id="excelFile" accept=".xlsx,.xls">
+            <button class="btn" onclick="importExcel()">Importar Excel</button>
+            <button class="btn btn-danger" onclick="eliminarPreguntas()">Eliminar Preguntas</button>
+            <button class="btn" onclick="downloadTemplate()">Descargar Plantilla</button>
+        </div>
+
+        <!-- Iniciar Test -->
+        <div class="input-group">
+            <button class="btn" onclick="iniciarTest()">Iniciar Test</button>
+        </div>
+
+        <!-- Sección de Test -->
+        <div class="test-section" id="testSection">
+            <h2>Test</h2>
+            <div id="testPregunta"></div>
+            <div id="testOpciones" class="options"></div>
+            <input type="text" id="testRespuesta" placeholder="Tu respuesta" style="display: none;">
+            <button class="btn" onclick="siguientePregunta()">Siguiente Pregunta</button>
+            <p id="resultado"></p>
+            <p id="puntaje"></p>
+        </div>
+    </div>
+
+    <script>
+        // Variable global para almacenar preguntas
+        let preguntas = JSON.parse(localStorage.getItem('preguntas') || '[]');
+        let indicePreguntaActual = 0;
+        let puntaje = 0;
+
+        // Función para mezclar preguntas (Fisher-Yates Shuffle)
+        function mezclarPreguntas(array) {
+            for (let i = array.length - 1; i > 0; i--) {
+                const j = Math.floor(Math.random() * (i + 1));
+                [array[i], array[j]] = [array[j], array[i]]; // Intercambiar elementos
+            }
+            return array;
+        }
+
+        // Importar Excel
+        function importExcel() {
+            const fileInput = document.getElementById('excelFile');
+            const file = fileInput.files[0];
+            
+            if (!file) {
+                alert('Por favor selecciona un archivo Excel');
+                return;
+            }
+
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                try {
+                    const data = new Uint8Array(e.target.result);
+                    const workbook = XLSX.read(data, { type: 'array' });
+                    const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
+                    const jsonData = XLSX.utils.sheet_to_json(firstSheet);
+
+                    if (jsonData.length === 0) {
+                        alert('El archivo está vacío');
+                        return;
+                    }
+
+                    // Limpiar preguntas existentes antes de importar nuevas
+                    preguntas = [];
+
+                    jsonData.forEach(row => {
+                        if (row.Pregunta && row.Categoría && row.Tipo) {
+                            const nuevaPregunta = {
+                                pregunta: row.Pregunta,
+                                categoria: row.Categoría,
+                                tipo: row.Tipo,
+                                opciones: []
+                            };
+
+                            if (row.Tipo === 'opcion_multiple') {
+                                const opciones = row.Opciones.split(',');
+                                const correcta = row.Correcta; // Índice de la opción correcta
+                                nuevaPregunta.opciones = opciones.map((opcion, index) => ({
+                                    texto: opcion.trim(),
+                                    correcta: index === parseInt(correcta)
+                                }));
+                            } else {
+                                nuevaPregunta.respuesta = row.Respuesta;
+                            }
+
+                            preguntas.push(nuevaPregunta);
+                        }
+                    });
+
+                    localStorage.setItem('preguntas', JSON.stringify(preguntas));
+                    alert('Preguntas importadas con éxito');
+                    fileInput.value = ''; // Limpiar input
+                } catch (error) {
+                    alert('Error al procesar el archivo: ' + error.message);
+                }
+            };
+            reader.onerror = function() {
+                alert('Error al leer el archivo');
+            };
+            reader.readAsArrayBuffer(file);
+        }
+
+        // Eliminar todas las preguntas
+        function eliminarPreguntas() {
+            if (confirm('¿Estás seguro de que deseas eliminar todas las preguntas?')) {
+                preguntas = [];
+                localStorage.removeItem('preguntas');
+                alert('Todas las preguntas han sido eliminadas.');
+            }
+        }
+
+        // Descargar plantilla Excel
+        function downloadTemplate() {
+            const template = [{
+                Pregunta: '¿Cuál es la capital de España?',
+                Respuesta: 'Madrid',
+                Categoría: 'Geografía',
+                Tipo: 'texto',
+                Opciones: '',
+                Correcta: ''
+            }, {
+                Pregunta: 'El sol es una estrella.',
+                Respuesta: 'Verdadero',
+                Categoría: 'Ciencia',
+                Tipo: 'verdadero_falso',
+                Opciones: '',
+                Correcta: ''
+            }, {
+                Pregunta: '¿Cuál es el planeta más cercano al sol?',
+                Respuesta: 'Mercurio',
+                Categoría: 'Ciencia',
+                Tipo: 'opcion_multiple',
+                Opciones: 'Mercurio,Venus,Tierra,Marte',
+                Correcta: '0' // Índice de la opción correcta (Mercurio)
+            }];
+
+            try {
+                const ws = XLSX.utils.json_to_sheet(template);
+                const wb = XLSX.utils.book_new();
+                XLSX.utils.book_append_sheet(wb, ws, 'Plantilla');
+                XLSX.writeFile(wb, 'plantilla_quiz.xlsx');
+            } catch (error) {
+                alert('Error al crear la plantilla: ' + error.message);
+            }
+        }
+
+        // Iniciar Test
+        function iniciarTest() {
+            if (preguntas.length === 0) {
+                alert('No hay preguntas para iniciar el test');
+                return;
+            }
+
+            // Mezclar preguntas antes de iniciar el test
+            preguntas = mezclarPreguntas(preguntas);
+
+            indicePreguntaActual = 0;
+            puntaje = 0;
+            document.getElementById('testSection').style.display = 'block';
+            mostrarPreguntaTest();
+        }
+
+        // Mostrar pregunta actual en el test
+        function mostrarPreguntaTest() {
+            const preguntaActual = preguntas[indicePreguntaActual];
+            const testPregunta = document.getElementById('testPregunta');
+            const testOpciones = document.getElementById('testOpciones');
+            const testRespuesta = document.getElementById('testRespuesta');
+            const resultado = document.getElementById('resultado');
+            const puntajeElement = document.getElementById('puntaje');
+
+            testPregunta.innerHTML = `
+                <strong>Pregunta ${indicePreguntaActual + 1}:</strong> ${preguntaActual.pregunta}<br>
+                <strong>Categoría:</strong> ${preguntaActual.categoria}
+            `;
+
+            testOpciones.innerHTML = '';
+            testRespuesta.style.display = 'none';
+
+            if (preguntaActual.tipo === 'verdadero_falso') {
+                testOpciones.innerHTML = `
+                    <button class="btn" onclick="verificarRespuesta('Verdadero')">Verdadero</button>
+                    <button class="btn" onclick="verificarRespuesta('Falso')">Falso</button>
+                `;
+            } else if (preguntaActual.tipo === 'opcion_multiple') {
+                preguntaActual.opciones.forEach((opcion, index) => {
+                    testOpciones.innerHTML += `
+                        <button class="btn" onclick="verificarRespuesta('${index}')">${opcion.texto}</button>
+                    `;
+                });
+            } else {
+                testRespuesta.style.display = 'block';
+                testRespuesta.value = '';
+            }
+
+            // Mostrar puntaje actual
+            const puntajeCalculado = (puntaje / preguntas.length) * 100 || 0;
+            puntajeElement.innerText = `Puntaje: ${puntajeCalculado.toFixed(2)}/100`;
+        }
+
+        // Verificar respuesta del usuario
+        function verificarRespuesta(respuestaUsuario) {
+            const preguntaActual = preguntas[indicePreguntaActual];
+            const resultado = document.getElementById('resultado');
+            const puntajeElement = document.getElementById('puntaje');
+
+            let esCorrecta = false;
+
+            if (preguntaActual.tipo === 'opcion_multiple') {
+                const opcionCorrecta = preguntaActual.opciones.findIndex(opcion => opcion.correcta);
+                esCorrecta = parseInt(respuestaUsuario) === opcionCorrecta;
+            } else {
+                esCorrecta = respuestaUsuario.trim().toLowerCase() === preguntaActual.respuesta.trim().toLowerCase();
+            }
+
+            if (esCorrecta) {
+                resultado.innerHTML = '<span class="correct">¡Correcto!</span>';
+                puntaje++;
+            } else {
+                resultado.innerHTML = '<span class="incorrect">✗ Incorrecto</span>';
+            }
+
+            // Actualizar puntaje
+            const puntajeCalculado = (puntaje / preguntas.length) * 100 || 0;
+            puntajeElement.innerText = `Puntaje: ${puntajeCalculado.toFixed(2)}/100`;
+
+            // Pasar a la siguiente pregunta
+            indicePreguntaActual++;
+            if (indicePreguntaActual < preguntas.length) {
+                mostrarPreguntaTest();
+            } else {
+                const puntajeFinal = ((puntaje / preguntas.length) * 100).toFixed(2);
+                alert(`Test completado. Puntaje final: ${puntajeFinal}/100`);
+                document.getElementById('testSection').style.display = 'none';
+            }
+        }
+
+        // Siguiente pregunta
+        function siguientePregunta() {
+            const testRespuesta = document.getElementById('testRespuesta');
+            if (testRespuesta.style.display !== 'none') {
+                verificarRespuesta(testRespuesta.value);
+            } else {
+                alert('Por favor selecciona una opción.');
+            }
+        }
+    </script>
+</body>
+</html>
